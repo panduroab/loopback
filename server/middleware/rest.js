@@ -23,8 +23,11 @@ module.exports = rest;
  */
 
 function rest() {
+  var preHandlers; // Cached pre-handlers
+
   return function restApiHandler(req, res, next) {
     var app = req.app;
+    // Need to get a new instance of the REST handler per request
     var restHandler = app.handler('rest');
 
     if (req.url === '/routes') {
@@ -33,16 +36,15 @@ function rest() {
       return res.send(app.remotes().toJSON());
     }
 
-    var preHandlers;
-
     if (!preHandlers) {
       preHandlers = [];
       var remotingOptions = app.get('remoting') || {};
 
       var contextOptions = remotingOptions.context;
       if (contextOptions !== false) {
-        if (typeof contextOptions !== 'object')
+        if (typeof contextOptions !== 'object') {
           contextOptions = {};
+        }
         preHandlers.push(loopback.context(contextOptions));
       }
 
@@ -57,9 +59,16 @@ function rest() {
         preHandlers.push(loopback.token({ model: AccessToken }));
       }
     }
-
-    async.eachSeries(preHandlers.concat(restHandler), function(handler, done) {
-      handler(req, res, done);
-    }, next);
+    if (preHandlers.length > 0) {
+      // Build a router to chain all handlers
+      var router = loopback.Router();
+      for (var i = 0, n = preHandlers.length; i < n; i++) {
+        router.use(preHandlers[i]);
+      }
+      router.use(restHandler);
+      return router(req, res, next);
+    } else {
+      return restHandler(req, res, next);
+    }
   };
 }
